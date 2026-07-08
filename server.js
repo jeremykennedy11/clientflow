@@ -1192,7 +1192,15 @@ app.post("/api/clients", requireAuth, requireRole(["owner", "admin"]), async (re
   incrementUsage(firmId, "clients");
   addActivity("client_added", `${req.user.email} added client ${client.name}`, users.find((item) => item.id === req.user.id), firmId);
   await saveData();
-  res.json({ ok: true, client: publicClientView(client), clients: publicFirmClients(firmId) });
+  const firm = getFirmById(firmId);
+  const emailResult = await sendEmail({
+    to: client.email,
+    subject: `You've been added to ${firm?.name || "your accounting firm"}'s ClientFlow portal`,
+    html: `<p>Hi ${client.name},</p><p>${firm?.name || "Your accounting firm"} has set up a secure portal for you to share documents and messages.</p><p><a href="${portalLink(client)}">Open your secure portal</a></p>`,
+  });
+  client.log = [...(client.log || []), { date: fmtDate(new Date()), type: "Email", note: "Welcome email with portal link sent to client." }];
+  await saveData();
+  res.json({ ok: true, client: publicClientView(client), clients: publicFirmClients(firmId), emailSimulated: Boolean(emailResult?.simulated) });
 });
 
 app.put("/api/clients/:id", requireAuth, requireRole(["owner", "admin"]), async (req, res) => {

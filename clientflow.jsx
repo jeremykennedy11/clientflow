@@ -1294,6 +1294,7 @@ function ClientsList({ clients, onSelect, setPage, onAddClient, onBulkRemind, ca
   const [form, setForm] = useState({ name: "", email: "", company: "", phone: "" });
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState("");
+  const [addSuccess, setAddSuccess] = useState("");
   const [reminding, setReminding] = useState(false);
   const [remindResult, setRemindResult] = useState("");
   const filtered = clients.filter(c => (c.name || "").toLowerCase().includes(q.toLowerCase()) || (c.company || "").toLowerCase().includes(q.toLowerCase()));
@@ -1319,10 +1320,13 @@ function ClientsList({ clients, onSelect, setPage, onAddClient, onBulkRemind, ca
     if (!form.name.trim() || !form.email.trim()) return;
     setAdding(true);
     setAddError("");
+    const email = form.email.trim();
     try {
-      await onAddClient({ name: form.name.trim(), email: form.email.trim(), company: form.company.trim(), phone: form.phone.trim() });
+      await onAddClient({ name: form.name.trim(), email, company: form.company.trim(), phone: form.phone.trim() });
       setForm({ name: "", email: "", company: "", phone: "" });
       setShowAdd(false);
+      setAddSuccess(`Client added — invite email sent to ${email}`);
+      setTimeout(() => setAddSuccess(""), 4500);
     } catch (error) {
       setAddError(error.message || "Couldn't add the client.");
     } finally {
@@ -1345,6 +1349,7 @@ function ClientsList({ clients, onSelect, setPage, onAddClient, onBulkRemind, ca
             <button className="dc-btn dc-btn-gold" onClick={() => setPage("builder")}><Plus size={15} /> New request</button>
           </div>
         } />
+      {addSuccess && <div style={{ color: "var(--green)", fontSize: 12.5, marginBottom: 12 }}>✓ {addSuccess}</div>}
       {showAdd && (
         <div className="dc-card" style={{ marginBottom: 16 }}>
           <div className="dc-serif" style={{ fontWeight: 600, marginBottom: 12 }}>Add a client</div>

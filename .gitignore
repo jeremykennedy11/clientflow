@@ -4,3 +4,6 @@ dist/
 data.json
 uploads/
 .claude/
+
+.vercel
+.env*

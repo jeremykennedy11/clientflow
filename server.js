@@ -382,8 +382,11 @@ async function saveData() {
     }
   }
 
-  // Local file always written as a backup of last resort
-  fs.writeFileSync(dataFile, JSON.stringify({ users, firms, clients: clientsState, invitations, activityLog, invoices }, null, 2));
+  // Local file backup of last resort — skipped on Vercel, where the deployed source
+  // directory is read-only and this write would throw on every request.
+  if (!onVercel) {
+    fs.writeFileSync(dataFile, JSON.stringify({ users, firms, clients: clientsState, invitations, activityLog, invoices }, null, 2));
+  }
 }
 
 function addActivity(action, detail, user, firmId = null) {

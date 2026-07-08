@@ -2165,7 +2165,7 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
   if (!client) {
     return (
       <div>
-        <SectionHeader eyebrow="Preview" title="Client portal preview" desc="This is what your client sees when they open their secure link." />
+        {!publicPortal && <SectionHeader eyebrow="Preview" title="Client portal preview" desc="This is what your client sees when they open their secure link." />}
         <div className="dc-card" style={{ maxWidth: 480, margin: "0 auto", textAlign: "center" }}>
           <div className="dc-serif" style={{ fontWeight: 700, fontSize: 22, marginBottom: 8 }}>No client loaded yet</div>
           <div style={{ fontSize: 13.5, color: "var(--ink-soft)" }}>The portal preview will appear here once a client is available.</div>
@@ -2180,12 +2180,14 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
 
   return (
     <div>
-      <SectionHeader eyebrow="Preview" title="Client portal preview" desc="This is what your client sees when they open their secure link."
-        right={
-          <select className="dc-select" style={{ width: "auto" }} value={client.id} onChange={(e) => setClientId(e.target.value)}>
-            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        } />
+      {!publicPortal && (
+        <SectionHeader eyebrow="Preview" title="Client portal preview" desc="This is what your client sees when they open their secure link."
+          right={
+            <select className="dc-select" style={{ width: "auto" }} value={client.id} onChange={(e) => setClientId(e.target.value)}>
+              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          } />
+      )}
 
       <div style={{ maxWidth: 480, margin: "0 auto" }}>
         <div className="dc-card" style={{ border: "2px solid var(--ink)" }}>

@@ -215,6 +215,7 @@ const initialClients = [
 
 const STORAGE_KEY = "clientflow-state";
 const AUTH_STORAGE_KEY = "clientflow-auth";
+const PORTAL_AUTH_STORAGE_KEY = "clientflow-portal-auth";
 // In dev, the API runs on its own port (3001); in a production build, frontend and API are
 // served from the same Vercel deployment, so relative "/api/..." paths just work same-origin.
 const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL ?? (import.meta.env?.DEV ? "http://localhost:3001" : "");
@@ -237,6 +238,44 @@ function getSavedAuth() {
   } catch {
     return null;
   }
+}
+
+function getSavedPortalAuth() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PORTAL_AUTH_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePortalAuth(token, client) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(PORTAL_AUTH_STORAGE_KEY, JSON.stringify({ token, client }));
+}
+
+function clearPortalAuth() {
+  if (typeof window !== "undefined") window.localStorage.removeItem(PORTAL_AUTH_STORAGE_KEY);
+}
+
+// A client reaches their portal two ways: a magic link (:identifier/:token in the URL, no
+// login) or a persistent login (client session token, no URL secret needed). Both funnel
+// into the same set of /api/portal/... action endpoints, just with a different base + auth.
+function getPortalRequestConfig(portalAccess, portalSessionToken) {
+  if (portalSessionToken) {
+    return { mePath: "/api/portal/session/me", actionBase: "/api/portal/session", authHeader: `Bearer ${portalSessionToken}` };
+  }
+  if (portalAccess) {
+    const base = `/api/portal/${encodeURIComponent(portalAccess.identifier)}/${portalAccess.token}`;
+    return { mePath: base, actionBase: base, authHeader: null };
+  }
+  return null;
+}
+
+function getPortalLoginRouteFromLocation() {
+  if (typeof window === "undefined") return false;
+  return /^\/portal\/login\/?$/.test(window.location.pathname);
 }
 
 function createPortalSlug(client) {
@@ -423,7 +462,7 @@ function StatCard({ label, value, sub, accent }) {
 /* ---------------------------------------------------------------------- */
 /*  Landing Page                                                          */
 /* ---------------------------------------------------------------------- */
-function Landing({ onStart, onDemo }) {
+function Landing({ onStart, onDemo, onPortalLogin }) {
   const [openFaq, setOpenFaq] = useState(null);
   const faqs = [
     ["Is Clara a real person or software?", "Clara is your AI employee — software that drafts messages, tracks document status, and organizes follow-ups on your behalf. Your firm stays in control of every send."],
@@ -437,7 +476,8 @@ function Landing({ onStart, onDemo }) {
       {/* nav */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "22px 6vw", borderBottom: "1px solid var(--line)" }}>
         <Logo />
-        <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button className="dc-btn dc-btn-ghost dc-hide-mobile" onClick={onPortalLogin}>Client login</button>
           <button className="dc-btn dc-btn-ghost dc-hide-mobile" onClick={onDemo}>View demo</button>
           <button className="dc-btn dc-btn-primary" onClick={onStart}>Start free trial</button>
         </div>
@@ -676,6 +716,65 @@ function Login({ onSubmit, onBack }) {
             {success && <div style={{ color: "var(--green)", fontSize: 12.5, marginBottom: 12 }}>{success}</div>}
             <button type="submit" className="dc-btn dc-btn-primary" style={{ width: "100%", justifyContent: "center" }} disabled={loading}>
               {loading ? "Please wait..." : mode === "login" ? "Log in" : mode === "forgot" ? "Send reset link" : "Create account"}
+            </button>
+          </form>
+        </div>
+        <div style={{ textAlign: "center", marginTop: 16 }}>
+          <button className="dc-btn dc-btn-ghost dc-btn-sm" onClick={onBack}><ChevronLeft size={13} /> Back to homepage</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PortalLogin({ onSubmit, onBack }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      await onSubmit({ email, password });
+    } catch (err) {
+      setError(err.message || "We couldn't sign you in.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="dc-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <style>{GLOBAL_CSS}</style>
+      <div style={{ width: "100%", maxWidth: 400 }}>
+        <div style={{ textAlign: "center", marginBottom: 26 }}>
+          <div style={{ display: "inline-block" }}><Logo /></div>
+        </div>
+        <div className="dc-card">
+          <div className="dc-serif" style={{ fontSize: 22, fontWeight: 600, marginBottom: 4 }}>Client portal login</div>
+          <div style={{ fontSize: 13.5, color: "var(--ink-soft)", marginBottom: 22 }}>For clients who've set up a persistent login. New here? Use the secure link your firm sent you instead.</div>
+
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: 14 }}>
+              <label className="dc-label">Email</label>
+              <div style={{ position: "relative" }}>
+                <Mail size={15} style={{ position: "absolute", left: 11, top: 12, color: "var(--ink-faint)" }} />
+                <input className="dc-input" style={{ paddingLeft: 34 }} type="email" placeholder="you@email.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              </div>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label className="dc-label">Password</label>
+              <div style={{ position: "relative" }}>
+                <Lock size={15} style={{ position: "absolute", left: 11, top: 12, color: "var(--ink-faint)" }} />
+                <input className="dc-input" style={{ paddingLeft: 34 }} type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              </div>
+            </div>
+            {error && <div style={{ color: "var(--red)", fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
+            <button type="submit" className="dc-btn dc-btn-primary" style={{ width: "100%", justifyContent: "center" }} disabled={loading}>
+              {loading ? "Please wait..." : "Log in"}
             </button>
           </form>
         </div>
@@ -1393,7 +1492,7 @@ function ClientChat({ client }) {
 /* ---------------------------------------------------------------------- */
 /*  Client profile                                                        */
 /* ---------------------------------------------------------------------- */
-function DocPreview({ url, authed, fileName, mimeType }) {
+function DocPreview({ url, authed, authHeader, fileName, mimeType }) {
   const [state, setState] = useState({ status: "loading", url: null });
 
   useEffect(() => {
@@ -1403,7 +1502,9 @@ function DocPreview({ url, authed, fileName, mimeType }) {
     setState({ status: "loading", url: null });
     (async () => {
       try {
-        const res = authed ? await authedFetch(url) : await fetch(`${API_BASE_URL}${url}`);
+        const res = authed
+          ? await authedFetch(url)
+          : await fetch(`${API_BASE_URL}${url}`, authHeader ? { headers: { Authorization: authHeader } } : undefined);
         if (!res.ok) throw new Error("preview fetch failed");
         const blob = await res.blob();
         objectUrl = URL.createObjectURL(blob);
@@ -1413,7 +1514,7 @@ function DocPreview({ url, authed, fileName, mimeType }) {
       }
     })();
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [url, authed]);
+  }, [url, authed, authHeader]);
 
   const isImage = (mimeType || "").startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp)$/i.test(fileName || "");
   const isPdf = mimeType === "application/pdf" || /\.pdf$/i.test(fileName || "");
@@ -1919,30 +2020,32 @@ function ClientPortalLanding({ client, onContinue }) {
   );
 }
 
-function PortalChat({ identifier, token, initialMessages, firmLabel }) {
+function PortalChat({ portalConfig, initialMessages, firmLabel }) {
   const [thread, setThread] = useState(initialMessages || []);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    if (!identifier || !token) return;
+    if (!portalConfig) return;
     let active = true;
-    const load = () => fetch(`${API_BASE_URL}/api/portal/${encodeURIComponent(identifier)}/${token}`)
+    const load = () => fetch(`${API_BASE_URL}${portalConfig.mePath}`, portalConfig.authHeader ? { headers: { Authorization: portalConfig.authHeader } } : undefined)
       .then((res) => res.json())
       .then((data) => { if (active && data.client) setThread(data.client.messages || []); })
       .catch(() => {});
     load();
     const timer = setInterval(load, 20000);
     return () => { active = false; clearInterval(timer); };
-  }, [identifier, token]);
+  }, [portalConfig?.mePath, portalConfig?.authHeader]);
 
   const send = async () => {
-    if (!text.trim() || sending || !identifier || !token) return;
+    if (!text.trim() || sending || !portalConfig) return;
     setSending(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/portal/${encodeURIComponent(identifier)}/${token}/message`, {
+      const headers = { "Content-Type": "application/json" };
+      if (portalConfig.authHeader) headers.Authorization = portalConfig.authHeader;
+      const res = await fetch(`${API_BASE_URL}${portalConfig.actionBase}/message`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ text: text.trim() }),
       });
       const data = await res.json();
@@ -1967,15 +2070,15 @@ function PortalChat({ identifier, token, initialMessages, firmLabel }) {
   );
 }
 
-function ClientPortal({ clients, clientId, setClientId, updateClient, publicPortal = false, portalClientOverride = null, portalAccess = null }) {
+function ClientPortal({ clients, clientId, setClientId, updateClient, publicPortal = false, portalClientOverride = null, portalAccess = null, portalSessionToken = null, onPortalLoginSaved = null, onPortalLogout = null }) {
   const [localClient, setLocalClient] = useState(portalClientOverride);
   useEffect(() => { setLocalClient(portalClientOverride); }, [portalClientOverride?.id]);
   const client = publicPortal ? (localClient || portalClientOverride) : (clients.find(c => c.id === clientId) || clients[0] || null);
-  const portalIdentifier = publicPortal && portalAccess ? portalAccess.identifier : client?.id;
-  const portalToken = publicPortal && portalAccess ? portalAccess.token : client?.portalToken;
+  const portalConfig = publicPortal ? getPortalRequestConfig(portalAccess, portalSessionToken) : null;
   const [showLanding, setShowLanding] = useState(publicPortal);
   const [uploads, setUploads] = useState({});
   const [uploadError, setUploadError] = useState("");
+  const [loginSetup, setLoginSetup] = useState({ password: "", confirm: "", status: "idle", error: "" });
 
   const patchDoc = (docId, patch) => {
     const nextClient = { ...client, documents: client.documents.map(d => d.id === docId ? { ...d, ...patch } : d) };
@@ -1986,11 +2089,13 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
 
   const setDocStatus = async (docId, status) => {
     patchDoc(docId, { status });
-    if (publicPortal && portalAccess && status === "Not applicable") {
+    if (publicPortal && portalConfig && status === "Not applicable") {
       try {
-        await fetch(`${API_BASE_URL}/api/portal/${encodeURIComponent(portalAccess.identifier)}/${portalAccess.token}/doc-status`, {
+        const headers = { "Content-Type": "application/json" };
+        if (portalConfig.authHeader) headers.Authorization = portalConfig.authHeader;
+        await fetch(`${API_BASE_URL}${portalConfig.actionBase}/doc-status`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ docId, status }),
         });
       } catch {
@@ -2009,10 +2114,13 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
     formData.append("docId", docId);
 
     try {
-      const endpoint = publicPortal && portalAccess ? `/api/portal/${encodeURIComponent(portalAccess.identifier)}/${portalAccess.token}/upload` : "/api/uploads";
-      const res = publicPortal
-        ? await fetch(`${API_BASE_URL}${endpoint}`, { method: "POST", body: formData })
-        : await authedFetch(endpoint, { method: "POST", body: formData });
+      let res;
+      if (publicPortal && portalConfig) {
+        const headers = portalConfig.authHeader ? { Authorization: portalConfig.authHeader } : undefined;
+        res = await fetch(`${API_BASE_URL}${portalConfig.actionBase}/upload`, { method: "POST", body: formData, headers });
+      } else {
+        res = await authedFetch("/api/uploads", { method: "POST", body: formData });
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Upload failed");
       setUploads((prev) => ({ ...prev, [docId]: data.fileName }));
@@ -2025,6 +2133,32 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
       });
     } catch (error) {
       setUploadError(error.message || "Upload failed");
+    }
+  };
+
+  const setupPersistentLogin = async () => {
+    if (!portalConfig) return;
+    if (loginSetup.password.length < 8) {
+      setLoginSetup((p) => ({ ...p, status: "error", error: "Password must be at least 8 characters." }));
+      return;
+    }
+    if (loginSetup.password !== loginSetup.confirm) {
+      setLoginSetup((p) => ({ ...p, status: "error", error: "Passwords don't match." }));
+      return;
+    }
+    setLoginSetup((p) => ({ ...p, status: "saving", error: "" }));
+    try {
+      const res = await fetch(`${API_BASE_URL}${portalConfig.actionBase}/set-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: loginSetup.password }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not set up your login.");
+      onPortalLoginSaved?.(data.token, data.client);
+      setLoginSetup({ password: "", confirm: "", status: "done", error: "" });
+    } catch (error) {
+      setLoginSetup((p) => ({ ...p, status: "error", error: error.message || "Could not set up your login." }));
     }
   };
 
@@ -2107,10 +2241,11 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
               {d.uploadedFile && (
                 <div style={{ marginTop: 7 }}>
                   <div style={{ fontSize: 11.5, color: "var(--green)" }}>Saved file: {d.uploadedFile}</div>
-                  {d.uploadedFileKey && (
+                  {d.uploadedFileKey && portalConfig && (
                     <DocPreview
-                      url={`/api/portal/${encodeURIComponent(portalIdentifier)}/${portalToken}/files/${encodeURIComponent(d.uploadedFileKey)}`}
+                      url={`${portalConfig.actionBase}/files/${encodeURIComponent(d.uploadedFileKey)}`}
                       authed={false}
+                      authHeader={portalConfig.authHeader}
                       fileName={d.uploadedFile}
                       mimeType={d.uploadedMimeType}
                     />
@@ -2121,12 +2256,50 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
           ))}
 
           <PortalChat
-            identifier={portalIdentifier}
-            token={portalToken}
+            portalConfig={portalConfig}
             initialMessages={client.messages || []}
             firmLabel={client.company || "your firm"}
           />
           {uploadError && <div style={{ color: "var(--red)", fontSize: 12.5, marginTop: 8 }}>{uploadError}</div>}
+
+          {publicPortal && portalSessionToken && (
+            <div style={{ marginTop: 16, textAlign: "center" }}>
+              <button className="dc-btn dc-btn-ghost dc-btn-sm" onClick={onPortalLogout}>Log out</button>
+            </div>
+          )}
+
+          {publicPortal && !portalSessionToken && portalConfig && (
+            <div className="dc-card" style={{ background: "var(--bg-alt)", border: "none", marginTop: 16 }}>
+              {loginSetup.status === "done" ? (
+                <div style={{ fontSize: 12.5, color: "var(--green)" }}>
+                  ✓ Persistent login set up — next time, sign in at <strong>/portal/login</strong> with {client.email} instead of using this link.
+                </div>
+              ) : (
+                <>
+                  <div className="dc-serif" style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 4 }}>Set up a persistent login</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 10 }}>
+                    Repeat client? Set a password once and sign in directly next time instead of needing a new link each visit.
+                  </div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <input
+                      className="dc-input" type="password" placeholder="Create a password"
+                      value={loginSetup.password}
+                      onChange={(e) => setLoginSetup((p) => ({ ...p, password: e.target.value }))}
+                    />
+                    <input
+                      className="dc-input" type="password" placeholder="Confirm password"
+                      value={loginSetup.confirm}
+                      onChange={(e) => setLoginSetup((p) => ({ ...p, confirm: e.target.value }))}
+                    />
+                    <button className="dc-btn dc-btn-outline dc-btn-sm" onClick={setupPersistentLogin} disabled={loginSetup.status === "saving"}>
+                      {loginSetup.status === "saving" ? "Saving..." : "Set up login"}
+                    </button>
+                    {loginSetup.error && <div style={{ color: "var(--red)", fontSize: 12 }}>{loginSetup.error}</div>}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -2204,12 +2377,16 @@ function ClaraChat({ clients }) {
 export default function App() {
   const savedState = getSavedState();
   const savedAuth = getSavedAuth();
+  const savedPortalAuth = getSavedPortalAuth();
   const initialPortalRoute = getPortalRouteFromLocation();
+  const initialPortalLoginRoute = getPortalLoginRouteFromLocation();
   const [resetToken, setResetToken] = useState(() => getResetTokenFromLocation());
   const [verifyToken, setVerifyToken] = useState(() => getVerifyTokenFromLocation());
   const [staticPage, setStaticPage] = useState(() => getStaticPageFromLocation());
-  const [view, setView] = useState(savedState?.view || (initialPortalRoute ? "portal-public" : "landing")); // landing | login | app | portal-public
-  const [page, setPage] = useState(savedState?.page || (initialPortalRoute ? "portal" : "dashboard"));
+  const [view, setView] = useState(savedState?.view || (initialPortalLoginRoute ? "portal-login" : ((initialPortalRoute || savedPortalAuth?.token) ? "portal-public" : "landing"))); // landing | login | app | portal-public | portal-login
+  const [page, setPage] = useState(savedState?.page || ((initialPortalRoute || savedPortalAuth?.token) ? "portal" : "dashboard"));
+  const [portalLoginRoute, setPortalLoginRoute] = useState(initialPortalLoginRoute);
+  const [portalSessionAuth, setPortalSessionAuth] = useState(savedPortalAuth);
   const [clients, setClients] = useState(() => normalizeClients(savedState?.clients || initialClients));
   const [selectedId, setSelectedId] = useState(savedState?.selectedId || null);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -2234,6 +2411,7 @@ export default function App() {
 
   useEffect(() => {
     setPortalRoute(getPortalRouteFromLocation());
+    setPortalLoginRoute(getPortalLoginRouteFromLocation());
   }, []);
 
   useEffect(() => {
@@ -2242,6 +2420,10 @@ export default function App() {
       setPage("portal");
     }
   }, [portalRoute]);
+
+  useEffect(() => {
+    if (portalLoginRoute) setView("portal-login");
+  }, [portalLoginRoute]);
 
   useEffect(() => {
     if (!portalRoute) return;
@@ -2261,6 +2443,28 @@ export default function App() {
       });
     return () => { active = false; };
   }, [portalRoute?.clientId, portalRoute?.token]);
+
+  // Resume a persistent client login (no magic link in the URL, just a saved session token).
+  useEffect(() => {
+    if (portalRoute || !portalSessionAuth?.token) return;
+    let active = true;
+    fetch(`${API_BASE_URL}/api/portal/session/me`, { headers: { Authorization: `Bearer ${portalSessionAuth.token}` } })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (!active) return;
+        if (ok && data.client) {
+          setPortalClientData(data.client);
+        } else {
+          clearPortalAuth();
+          setPortalSessionAuth(null);
+          setPortalError(data.error || "Your session has expired. Please sign in again.");
+        }
+      })
+      .catch(() => {
+        if (active) setPortalError("Unable to load your portal session.");
+      });
+    return () => { active = false; };
+  }, [portalRoute, portalSessionAuth?.token]);
 
   useEffect(() => {
     if (!savedAuth?.token) {
@@ -2308,6 +2512,40 @@ export default function App() {
   const updateClient = (updated) => {
     setClients((cs) => cs.map((c) => c.id === updated.id ? updated : c));
     persistClient(updated);
+  };
+
+  const handlePortalLoginSubmit = async ({ email, password }) => {
+    const res = await fetch(`${API_BASE_URL}/api/portal/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Invalid email or password.");
+    savePortalAuth(data.token, data.client);
+    setPortalSessionAuth({ token: data.token, client: data.client });
+    setPortalClientData(data.client);
+    setPortalError("");
+    if (typeof window !== "undefined") window.history.replaceState({}, "", "/");
+    setPortalLoginRoute(false);
+    setView("portal-public");
+    setPage("portal");
+  };
+
+  const handlePortalLoginSaved = (token, client) => {
+    savePortalAuth(token, client);
+    setPortalSessionAuth({ token, client });
+  };
+
+  const handlePortalLogout = () => {
+    clearPortalAuth();
+    setPortalSessionAuth(null);
+    setPortalClientData(null);
+    setPortalError("");
+    if (typeof window !== "undefined") window.history.replaceState({}, "", "/");
+    setPortalRoute(null);
+    setView("landing");
+    setPage("dashboard");
   };
 
   const setRecurringChecklist = (clientId, config) => {
@@ -2455,12 +2693,14 @@ export default function App() {
   }
 
   if (!authReady) return null;
-  if (view === "landing") return <Landing onStart={() => setView("login")} onDemo={() => { setClients(initialClients); setView("app"); setPage("dashboard"); }} />;
+  if (view === "landing") return <Landing onStart={() => setView("login")} onDemo={() => { setClients(initialClients); setView("app"); setPage("dashboard"); }} onPortalLogin={() => { if (typeof window !== "undefined") window.history.pushState({}, "", "/portal/login"); setPortalLoginRoute(true); setView("portal-login"); }} />;
   if (view === "login") return <Login onSubmit={handleAuthSubmit} onBack={() => setView("landing")} />;
+  if (view === "portal-login") return <PortalLogin onSubmit={handlePortalLoginSubmit} onBack={() => { if (typeof window !== "undefined") window.history.replaceState({}, "", "/"); setPortalLoginRoute(false); setView("landing"); }} />;
 
   const selectedClient = clients.find(c => c.id === selectedId);
+  const isPortalSession = !portalRoute && Boolean(portalSessionAuth?.token);
 
-  if (portalRoute && portalClientData) {
+  if ((portalRoute || isPortalSession) && portalClientData) {
     return (
       <div className="dc-root" style={{ padding: 24 }}>
         <style>{GLOBAL_CSS}</style>
@@ -2472,18 +2712,26 @@ export default function App() {
           publicPortal={true}
           portalClientOverride={portalClientData}
           portalAccess={portalRoute}
+          portalSessionToken={isPortalSession ? portalSessionAuth.token : null}
+          onPortalLoginSaved={handlePortalLoginSaved}
+          onPortalLogout={handlePortalLogout}
         />
       </div>
     );
   }
 
-  if (portalRoute && portalError) {
+  if ((portalRoute || isPortalSession) && portalError) {
     return (
       <div className="dc-root" style={{ padding: 24 }}>
         <style>{GLOBAL_CSS}</style>
         <div className="dc-card" style={{ maxWidth: 520, margin: "40px auto", textAlign: "center" }}>
-          <div className="dc-serif" style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>This portal link is no longer available</div>
-          <div style={{ color: "var(--ink-soft)", fontSize: 13.5 }}>{portalError}</div>
+          <div className="dc-serif" style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>{portalRoute ? "This portal link is no longer available" : "Your session has ended"}</div>
+          <div style={{ color: "var(--ink-soft)", fontSize: 13.5, marginBottom: 16 }}>{portalError}</div>
+          {isPortalSession && (
+            <button className="dc-btn dc-btn-outline dc-btn-sm" onClick={() => { if (typeof window !== "undefined") window.history.pushState({}, "", "/portal/login"); setPortalLoginRoute(true); setView("portal-login"); }}>
+              Sign in again
+            </button>
+          )}
         </div>
       </div>
     );

@@ -67,6 +67,13 @@ const authLimiter = rateLimit({
 
 app.use("/api/auth", authLimiter);
 
+const portalAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // On Vercel a "warm" instance can serve several requests over a few minutes, and a sibling
 // instance may have written changes in between — reload from Supabase periodically so reads
 // don't serve stale state from whichever instance happens to handle the request.
@@ -208,6 +215,10 @@ function createFirm(name, ownerUserId) {
 
 function getFirmClients(firmId) {
   return clientsState.filter((client) => client.firmId === firmId);
+}
+
+function publicFirmClients(firmId) {
+  return getFirmClients(firmId).map(publicClientView);
 }
 
 function getFirmUsers(firmId) {
@@ -435,7 +446,11 @@ function requireAuth(req, res, next) {
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
   if (!token) return res.status(401).json({ error: "Missing token" });
   try {
-    req.user = jwt.verify(token, secret);
+    const payload = jwt.verify(token, secret);
+    // Client portal tokens are signed with the same secret but must never grant firm-side
+    // access — requireRole defaults a missing role to "owner", so this check is load-bearing.
+    if (payload.type === "client") return res.status(401).json({ error: "Invalid token" });
+    req.user = payload;
     next();
   } catch {
     res.status(401).json({ error: "Invalid token" });
@@ -456,6 +471,44 @@ function requireCronSecret(req, res, next) {
   const expected = process.env.CRON_SECRET;
   if (!expected) return res.status(500).json({ error: "CRON_SECRET not configured" });
   if (req.headers.authorization !== `Bearer ${expected}`) return res.status(401).json({ error: "Unauthorized" });
+  next();
+}
+
+function createClientToken(client) {
+  return jwt.sign({ type: "client", clientId: client.id, firmId: client.firmId }, secret, { expiresIn: "30d" });
+}
+
+// Clients without portal password never expose it: this is the single choke point
+// every client-facing and firm-facing response should pass through.
+function publicClientView(client) {
+  if (!client) return client;
+  const { portalPasswordHash, ...rest } = client;
+  return rest;
+}
+
+// Portal routes are reached two ways: a magic link (:identifier/:token in the URL,
+// no login required) or a persistent client login (Bearer client-session token,
+// no URL secret required). Both resolve to the same req.portalClient.
+function resolvePortalClient(req, res, next) {
+  if (req.params.identifier && req.params.token) {
+    const client = findClientByPortal(req.params.identifier, req.params.token);
+    if (!client) return res.status(404).json({ error: "Portal link is invalid or no longer active." });
+    req.portalClient = client;
+    return next();
+  }
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  if (!token) return res.status(401).json({ error: "Please sign in to your client portal." });
+  let payload;
+  try {
+    payload = jwt.verify(token, secret);
+  } catch {
+    return res.status(401).json({ error: "Your session has expired. Please sign in again." });
+  }
+  if (payload.type !== "client") return res.status(401).json({ error: "Please sign in to your client portal." });
+  const client = clientsState.find((c) => c.id === payload.clientId);
+  if (!client || client.portalEnabled === false) return res.status(404).json({ error: "Portal access is no longer active." });
+  req.portalClient = client;
   next();
 }
 
@@ -833,7 +886,7 @@ app.post("/api/auth/signup", async (req, res) => {
   });
   const team = getFirmUsers(user.firmId).map((member) => ({ id: member.id, name: member.name, email: member.email, role: member.role || "owner" }));
   addActivity("signup", `${user.name} created a new firm account`, user, user.firmId);
-  const response = { token, refreshToken, user: publicUser(user), clients: getFirmClients(user.firmId), team, invitations: invitations.filter((invite) => invite.firmId === user.firmId), activityLog: activityLog.filter((entry) => entry.firmId === user.firmId), billingSummary: getBillingSummary(user.firmId) };
+  const response = { token, refreshToken, user: publicUser(user), clients: publicFirmClients(user.firmId), team, invitations: invitations.filter((invite) => invite.firmId === user.firmId), activityLog: activityLog.filter((entry) => entry.firmId === user.firmId), billingSummary: getBillingSummary(user.firmId) };
   if (emailResult?.simulated && process.env.NODE_ENV !== "production") response.verifyLink = verifyLink;
   res.json(response);
 });
@@ -853,7 +906,7 @@ app.post("/api/auth/login", async (req, res) => {
   await saveData();
   const team = getFirmUsers(user.firmId).map((member) => ({ id: member.id, name: member.name, email: member.email, role: member.role || "owner" }));
   addActivity("login", `${user.name} signed in`, user, user.firmId);
-  res.json({ token, refreshToken, user: publicUser(user), clients: getFirmClients(user.firmId), team, invitations: invitations.filter((invite) => invite.firmId === user.firmId), activityLog: activityLog.filter((entry) => entry.firmId === user.firmId), billingSummary: getBillingSummary(user.firmId) });
+  res.json({ token, refreshToken, user: publicUser(user), clients: publicFirmClients(user.firmId), team, invitations: invitations.filter((invite) => invite.firmId === user.firmId), activityLog: activityLog.filter((entry) => entry.firmId === user.firmId), billingSummary: getBillingSummary(user.firmId) });
 });
 
 app.post("/api/auth/refresh", async (req, res) => {
@@ -902,7 +955,7 @@ app.get("/api/me", requireAuth, async (req, res) => {
   if (!user) return res.status(404).json({ error: "User not found" });
   const firm = firms.find((item) => item.id === user.firmId) || null;
   const team = getFirmUsers(user.firmId).map((member) => ({ id: member.id, name: member.name, email: member.email, role: member.role || "owner" }));
-  res.json({ user: publicUser(user), firm, clients: getFirmClients(user.firmId), team, invitations: invitations.filter((invite) => invite.firmId === user.firmId), activityLog: activityLog.filter((entry) => entry.firmId === user.firmId), billingSummary: getBillingSummary(user.firmId) });
+  res.json({ user: publicUser(user), firm, clients: publicFirmClients(user.firmId), team, invitations: invitations.filter((invite) => invite.firmId === user.firmId), activityLog: activityLog.filter((entry) => entry.firmId === user.firmId), billingSummary: getBillingSummary(user.firmId) });
 });
 
 app.post("/api/auth/forgot-password", async (req, res) => {
@@ -1139,7 +1192,7 @@ app.post("/api/clients", requireAuth, requireRole(["owner", "admin"]), async (re
   incrementUsage(firmId, "clients");
   addActivity("client_added", `${req.user.email} added client ${client.name}`, users.find((item) => item.id === req.user.id), firmId);
   await saveData();
-  res.json({ ok: true, client, clients: getFirmClients(firmId) });
+  res.json({ ok: true, client: publicClientView(client), clients: publicFirmClients(firmId) });
 });
 
 app.put("/api/clients/:id", requireAuth, requireRole(["owner", "admin"]), async (req, res) => {
@@ -1153,10 +1206,11 @@ app.put("/api/clients/:id", requireAuth, requireRole(["owner", "admin"]), async 
     id: existing.id,
     firmId: existing.firmId,
     portalToken: existing.portalToken,
+    portalPasswordHash: existing.portalPasswordHash,
   }], firmId)[0];
   clientsState = clientsState.map((client) => client.id === existing.id ? merged : client);
   await saveData();
-  res.json({ ok: true, client: merged });
+  res.json({ ok: true, client: publicClientView(merged) });
 });
 
 app.post("/api/clients/:id/send-followup", requireAuth, requireRole(["owner", "admin"]), async (req, res) => {
@@ -1210,14 +1264,11 @@ app.post("/api/clients/:id/messages", requireAuth, async (req, res) => {
   res.json({ ok: true, messages: client.messages });
 });
 
-app.post(["/api/portal/:identifier/:token/message", "/api/p/:identifier/:token/message"], async (req, res) => {
+async function portalMessageHandler(req, res) {
   try {
-    const client = findClientByPortal(req.params.identifier, req.params.token);
-    if (!client) return res.status(404).json({ error: "Portal link is invalid or no longer active." });
+    const target = req.portalClient;
     const text = String(req.body?.text || "").trim();
     if (!text) return res.status(400).json({ error: "Message text is required." });
-    const target = clientsState.find((item) => item.id === client.id);
-    if (!target) return res.status(404).json({ error: "Client not found" });
     appendClientMessage(target, "client", target.name, text);
     addActivity("portal_message", `${target.name} sent a message from the client portal`, null, target.firmId);
     await saveData();
@@ -1225,7 +1276,9 @@ app.post(["/api/portal/:identifier/:token/message", "/api/p/:identifier/:token/m
   } catch (error) {
     res.status(500).json({ error: error.message || "Message failed" });
   }
-});
+}
+app.post(["/api/portal/:identifier/:token/message", "/api/p/:identifier/:token/message"], resolvePortalClient, portalMessageHandler);
+app.post("/api/portal/session/message", resolvePortalClient, portalMessageHandler);
 
 // Vercel Cron always sends GET; keep POST too so it's easy to trigger manually with the secret.
 app.all("/api/reminders/run", requireCronSecret, async (req, res) => {
@@ -1277,7 +1330,7 @@ app.post("/api/clients/bulk-remind", requireAuth, requireRole(["owner", "admin"]
   }
 
   if (sent > 0) await saveData();
-  res.json({ ok: true, sent, clients: getFirmClients(firmId) });
+  res.json({ ok: true, sent, clients: publicFirmClients(firmId) });
 });
 
 app.delete("/api/clients/:id", requireAuth, requireRole(["owner", "admin"]), async (req, res) => {
@@ -1292,19 +1345,53 @@ app.delete("/api/clients/:id", requireAuth, requireRole(["owner", "admin"]), asy
   if (firm?.usage) firm.usage.clients = Math.max(0, Number(firm.usage.clients || 0) - 1);
   addActivity("client_removed", `${req.user.email} removed client ${existing.name}`, users.find((item) => item.id === req.user.id), firmId);
   await saveData();
-  res.json({ ok: true, clients: getFirmClients(firmId) });
+  res.json({ ok: true, clients: publicFirmClients(firmId) });
 });
 
-app.get(["/api/portal/:identifier/:token", "/api/portal/:identifier/:token/", "/api/p/:identifier/:token", "/api/p/:identifier/:token/"], async (req, res) => {
-  const client = findClientByPortal(req.params.identifier, req.params.token);
-  if (!client) return res.status(404).json({ error: "Portal link is invalid or no longer active." });
-  res.json({ ok: true, client });
+async function portalMeHandler(req, res) {
+  res.json({ ok: true, client: publicClientView(req.portalClient) });
+}
+// Registered before the :identifier/:token wildcard below — Express matches routes in
+// registration order, and "/api/portal/session/me" would otherwise be swallowed by the
+// wildcard as identifier="session", token="me".
+app.get("/api/portal/session/me", resolvePortalClient, portalMeHandler);
+app.get(["/api/portal/:identifier/:token", "/api/portal/:identifier/:token/", "/api/p/:identifier/:token", "/api/p/:identifier/:token/"], resolvePortalClient, portalMeHandler);
+
+// Persistent client login: set once from inside a magic-link session, then reused across visits
+// without needing the emailed link again — useful for retainer clients with recurring requests.
+app.post(["/api/portal/:identifier/:token/set-password", "/api/p/:identifier/:token/set-password"], portalAuthLimiter, resolvePortalClient, async (req, res) => {
+  const password = String(req.body?.password || "");
+  if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters long." });
+  const target = req.portalClient;
+  target.portalPasswordHash = await hashPassword(password);
+  addActivity("portal_password_set", `${target.name} set up a persistent portal login`, null, target.firmId);
+  await saveData();
+  res.json({ ok: true, token: createClientToken(target), client: publicClientView(target) });
+});
+app.post("/api/portal/session/set-password", portalAuthLimiter, resolvePortalClient, async (req, res) => {
+  const password = String(req.body?.password || "");
+  if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters long." });
+  const target = req.portalClient;
+  target.portalPasswordHash = await hashPassword(password);
+  addActivity("portal_password_set", `${target.name} updated their portal login password`, null, target.firmId);
+  await saveData();
+  res.json({ ok: true, client: publicClientView(target) });
 });
 
-app.post(["/api/portal/:identifier/:token/upload", "/api/portal/:identifier/:token/upload/", "/api/p/:identifier/:token/upload", "/api/p/:identifier/:token/upload/"], upload.single("file"), async (req, res) => {
+app.post("/api/portal/login", portalAuthLimiter, async (req, res) => {
+  const { email, password } = req.body || {};
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const client = clientsState.find((c) => c.portalPasswordHash && c.portalEnabled !== false && (c.email || "").toLowerCase() === normalizedEmail);
+  if (!client) return res.status(401).json({ error: "Invalid email or password." });
+  const valid = await verifyPassword(password, client.portalPasswordHash);
+  if (!valid) return res.status(401).json({ error: "Invalid email or password." });
+  addActivity("portal_login", `${client.name} signed in to the client portal`, null, client.firmId);
+  res.json({ ok: true, token: createClientToken(client), client: publicClientView(client) });
+});
+
+async function portalUploadHandler(req, res) {
   try {
-    const client = findClientByPortal(req.params.identifier, req.params.token);
-    if (!client) return res.status(404).json({ error: "Portal link is invalid or no longer active." });
+    const target = req.portalClient;
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
     const ext = path.extname(req.file.originalname || "");
@@ -1324,57 +1411,54 @@ app.post(["/api/portal/:identifier/:token/upload", "/api/portal/:identifier/:tok
     }
 
     const docId = req.body.docId;
-    const target = clientsState.find((c) => c.id === client.id);
-    if (target) {
-      target.documents = (target.documents || []).map((doc) => {
-        if (doc.id !== docId) return doc;
-        const previousVersion = doc.uploadedFile ? {
-          uploadedAt: doc.uploadedAt,
-          uploadedFile: doc.uploadedFile,
-          uploadedUrl: doc.uploadedUrl,
-          uploadedFileKey: doc.uploadedFileKey,
-          uploadedStoragePath: doc.uploadedStoragePath || null,
-          uploadedMimeType: doc.uploadedMimeType || null,
-        } : null;
-        return {
-          ...doc,
-          status: "Received",
-          uploadedAt: new Date().toISOString(),
-          uploadedFile: req.file.originalname,
-          uploadedUrl,
-          uploadedFileKey: fileKey,
-          uploadedStoragePath: storagePath,
-          uploadedMimeType: req.file.mimetype || null,
-          aiClassificationFlag: null,
-          versions: previousVersion ? [...(doc.versions || []), previousVersion] : (doc.versions || []),
-        };
-      });
-      target.log = [
-        ...(target.log || []),
-        { date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), type: "Portal upload", note: `Uploaded ${req.file.originalname}` },
-      ];
-      addActivity("portal_upload", `${client.name} uploaded ${req.file.originalname}`, null, client.firmId);
-      const uploadedDoc = target.documents.find((doc) => doc.id === docId);
-      if (uploadedDoc) {
-        try { await classifyUpload(target, uploadedDoc, req.file.originalname); } catch { /* best-effort only */ }
-      }
-      await saveData();
+    target.documents = (target.documents || []).map((doc) => {
+      if (doc.id !== docId) return doc;
+      const previousVersion = doc.uploadedFile ? {
+        uploadedAt: doc.uploadedAt,
+        uploadedFile: doc.uploadedFile,
+        uploadedUrl: doc.uploadedUrl,
+        uploadedFileKey: doc.uploadedFileKey,
+        uploadedStoragePath: doc.uploadedStoragePath || null,
+        uploadedMimeType: doc.uploadedMimeType || null,
+      } : null;
+      return {
+        ...doc,
+        status: "Received",
+        uploadedAt: new Date().toISOString(),
+        uploadedFile: req.file.originalname,
+        uploadedUrl,
+        uploadedFileKey: fileKey,
+        uploadedStoragePath: storagePath,
+        uploadedMimeType: req.file.mimetype || null,
+        aiClassificationFlag: null,
+        versions: previousVersion ? [...(doc.versions || []), previousVersion] : (doc.versions || []),
+      };
+    });
+    target.log = [
+      ...(target.log || []),
+      { date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), type: "Portal upload", note: `Uploaded ${req.file.originalname}` },
+    ];
+    addActivity("portal_upload", `${target.name} uploaded ${req.file.originalname}`, null, target.firmId);
+    const uploadedDoc = target.documents.find((doc) => doc.id === docId);
+    if (uploadedDoc) {
+      try { await classifyUpload(target, uploadedDoc, req.file.originalname); } catch { /* best-effort only */ }
     }
+    await saveData();
 
     res.json({ ok: true, fileName: req.file.originalname, url: uploadedUrl, fileKey, storagePath, mimeType: req.file.mimetype });
   } catch (error) {
     res.status(500).json({ error: error.message || "Upload failed" });
   }
-});
+}
+app.post(
+  ["/api/portal/:identifier/:token/upload", "/api/portal/:identifier/:token/upload/", "/api/p/:identifier/:token/upload", "/api/p/:identifier/:token/upload/"],
+  resolvePortalClient, upload.single("file"), portalUploadHandler
+);
+app.post("/api/portal/session/upload", resolvePortalClient, upload.single("file"), portalUploadHandler);
 
-app.post(["/api/portal/:identifier/:token/comment", "/api/portal/:identifier/:token/comment/", "/api/p/:identifier/:token/comment", "/api/p/:identifier/:token/comment/"], async (req, res) => {
+async function portalCommentHandler(req, res) {
   try {
-    const client = findClientByPortal(req.params.identifier, req.params.token);
-    if (!client) return res.status(404).json({ error: "Portal link is invalid or no longer active." });
-
-    const target = clientsState.find((item) => item.id === client.id);
-    if (!target) return res.status(404).json({ error: "Client not found" });
-
+    const target = req.portalClient;
     const note = (req.body?.comment || "").trim();
     if (!note) return res.status(400).json({ error: "Comment is required" });
 
@@ -1383,23 +1467,22 @@ app.post(["/api/portal/:identifier/:token/comment", "/api/portal/:identifier/:to
       { date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), type: "Portal", note: `Client comment: ${note}` },
     ];
 
-    incrementUsage(client.firmId, "portalUploads");
-    addActivity("portal_comment", `${client.name} left a comment in the client portal`, null, client.firmId);
+    incrementUsage(target.firmId, "portalUploads");
+    addActivity("portal_comment", `${target.name} left a comment in the client portal`, null, target.firmId);
     await saveData();
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ error: error.message || "Comment failed" });
   }
-});
+}
+app.post(["/api/portal/:identifier/:token/comment", "/api/portal/:identifier/:token/comment/", "/api/p/:identifier/:token/comment", "/api/p/:identifier/:token/comment/"], resolvePortalClient, portalCommentHandler);
+app.post("/api/portal/session/comment", resolvePortalClient, portalCommentHandler);
 
-app.post(["/api/portal/:identifier/:token/doc-status", "/api/p/:identifier/:token/doc-status"], async (req, res) => {
+async function portalDocStatusHandler(req, res) {
   try {
-    const client = findClientByPortal(req.params.identifier, req.params.token);
-    if (!client) return res.status(404).json({ error: "Portal link is invalid or no longer active." });
+    const target = req.portalClient;
     const { docId, status } = req.body || {};
     if (status !== "Not applicable") return res.status(400).json({ error: "Only 'Not applicable' can be set from the portal." });
-    const target = clientsState.find((item) => item.id === client.id);
-    if (!target) return res.status(404).json({ error: "Client not found" });
     const doc = (target.documents || []).find((d) => d.id === docId);
     if (!doc) return res.status(404).json({ error: "Document not found" });
     target.documents = target.documents.map((d) => d.id === docId ? { ...d, status } : d);
@@ -1407,18 +1490,20 @@ app.post(["/api/portal/:identifier/:token/doc-status", "/api/p/:identifier/:toke
       ...(target.log || []),
       { date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), type: "Portal", note: `Client marked "${doc.name}" as not applicable.` },
     ];
-    addActivity("portal_doc_status", `${client.name} marked "${doc.name}" as not applicable`, null, client.firmId);
+    addActivity("portal_doc_status", `${target.name} marked "${doc.name}" as not applicable`, null, target.firmId);
     await saveData();
-    res.json({ ok: true, client: target });
+    res.json({ ok: true, client: publicClientView(target) });
   } catch (error) {
     res.status(500).json({ error: error.message || "Update failed" });
   }
-});
+}
+app.post(["/api/portal/:identifier/:token/doc-status", "/api/p/:identifier/:token/doc-status"], resolvePortalClient, portalDocStatusHandler);
+app.post("/api/portal/session/doc-status", resolvePortalClient, portalDocStatusHandler);
 
 app.post("/api/assistant", requireAuth, async (req, res) => {
   try {
     const { system, messages } = req.body || {};
-    const firmClients = getFirmClients(req.user.firmId || "firm-default");
+    const firmClients = publicFirmClients(req.user.firmId || "firm-default");
     const scopedSystem = firmClients.length ? `${system}\n\nCURRENT FIRM CLIENTS:\n${JSON.stringify(firmClients.slice(0, 20))}` : system;
     if (isUsageBlocked(req.user.firmId, "aiMessages")) {
       return res.status(429).json({ error: "Your current plan limit for AI messages has been reached. Upgrade to continue." });
@@ -1456,10 +1541,9 @@ app.post("/api/uploads", requireAuth, upload.single("file"), async (req, res) =>
   }
 });
 
-app.get(["/api/portal/:identifier/:token/files/:key", "/api/p/:identifier/:token/files/:key"], async (req, res) => {
+async function portalFileHandler(req, res) {
   try {
-    const client = findClientByPortal(req.params.identifier, req.params.token);
-    if (!client) return res.status(404).json({ error: "Portal link is invalid or no longer active." });
+    const client = req.portalClient;
     const key = path.basename(req.params.key);
     const allFiles = (client.documents || []).flatMap((d) => [d, ...(d.versions || [])]);
     const matchedFile = allFiles.find((f) => f.uploadedFileKey === key);
@@ -1474,7 +1558,9 @@ app.get(["/api/portal/:identifier/:token/files/:key", "/api/p/:identifier/:token
   } catch (error) {
     res.status(500).json({ error: error.message || "File fetch failed" });
   }
-});
+}
+app.get(["/api/portal/:identifier/:token/files/:key", "/api/p/:identifier/:token/files/:key"], resolvePortalClient, portalFileHandler);
+app.get("/api/portal/session/files/:key", resolvePortalClient, portalFileHandler);
 
 app.get("/api/files/:key", requireAuth, async (req, res) => {
   const key = path.basename(req.params.key);

@@ -539,6 +539,7 @@ async function askLLM(system, messages) {
       headers: {
         "Content-Type": "application/json",
         "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
         model: "claude-sonnet-5",
@@ -552,6 +553,7 @@ async function askLLM(system, messages) {
       const data = await res.json();
       return (data.content || []).map((b) => b.text || "").join("\n").trim();
     }
+    console.warn("[askLLM] Anthropic request failed:", res.status, await res.text().catch(() => ""));
   }
 
   const openaiKey = process.env.OPENAI_API_KEY;
@@ -575,6 +577,7 @@ async function askLLM(system, messages) {
       const data = await res.json();
       return data.choices?.[0]?.message?.content?.trim() || "";
     }
+    console.warn("[askLLM] OpenAI request failed:", res.status, await res.text().catch(() => ""));
   }
 
   return LLM_FALLBACK_TEXT;

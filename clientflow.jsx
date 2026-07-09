@@ -1479,7 +1479,7 @@ function ClientChat({ client }) {
   };
 
   return (
-    <div className="dc-card" style={{ marginTop: 16 }}>
+    <div className="dc-card">
       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
         <MessageSquare size={15} color="var(--gold-dark)" />
         <span className="dc-serif" style={{ fontWeight: 600 }}>Messages with {client.name.split(" ")[0]}</span>
@@ -1741,9 +1741,8 @@ function ClientProfile({ client, updateClient, onBack, onRemoveClient, setPage, 
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
-        <div>
-          <div className="dc-card" style={{ marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginBottom: 16, alignItems: "start" }}>
+        <div className="dc-card">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
               <div className="dc-serif" style={{ fontWeight: 600 }}>Document checklist</div>
               {canManageClients && selectedDocs.size > 0 && (
@@ -1791,8 +1790,13 @@ function ClientProfile({ client, updateClient, onBack, onRemoveClient, setPage, 
                 </select>
               </div>
             ))}
-          </div>
+        </div>
 
+        <ClientChat client={client} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
+        <div>
           <div className="dc-card">
             <div className="dc-serif" style={{ fontWeight: 600, marginBottom: 12 }}>Communication history</div>
             {client.log.length === 0 && <div style={{ fontSize: 13, color: "var(--ink-faint)" }}>No communication logged yet.</div>}
@@ -1803,8 +1807,6 @@ function ClientProfile({ client, updateClient, onBack, onRemoveClient, setPage, 
               </div>
             ))}
           </div>
-
-          <ClientChat client={client} />
         </div>
 
         <div>
@@ -2307,8 +2309,8 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
           } />
       )}
 
-      <div style={{ maxWidth: 480, margin: "0 auto" }}>
-        <div className="dc-card" style={{ border: "2px solid var(--ink)" }}>
+      <div style={{ maxWidth: 900, margin: "0 auto" }}>
+        <div className="dc-card" style={{ border: "2px solid var(--ink)", marginBottom: 16 }}>
           <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--gold-bg)", border: "1px solid var(--line)", marginBottom: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -2324,7 +2326,7 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
           <div style={{ textAlign: "center", marginBottom: 18 }}>
             <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 4 }}>Prepared for <strong>{client.name}</strong> — {client.company}</div>
           </div>
-          <div className="dc-card" style={{ background: "var(--bg-alt)", border: "none", marginBottom: 16, fontSize: 13, color: "var(--ink-soft)" }}>
+          <div className="dc-card" style={{ background: "var(--bg-alt)", border: "none", marginBottom: 0, fontSize: 13, color: "var(--ink-soft)" }}>
             Hi {client.name.split(" ")[0]}, please upload the items below when you get a chance. If something doesn't apply to you, just mark it "Not applicable."
           </div>
 
@@ -2333,7 +2335,7 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
             const done = client.documents.filter(d => ["Received", "In review", "Approved"].includes(d.status)).length;
             const pct = Math.round((done / total) * 100);
             return (
-              <div style={{ marginBottom: 18 }}>
+              <div style={{ marginTop: 18 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--ink-soft)", marginBottom: 6 }}>
                   <span>{done} of {total} documents received</span>
                   <span>{pct}%</span>
@@ -2344,7 +2346,11 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
               </div>
             );
           })()}
+        </div>
 
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16, marginBottom: 16, alignItems: "start" }}>
+        <div className="dc-card">
+          <div className="dc-serif" style={{ fontWeight: 600, marginBottom: 14 }}>Documents</div>
           {client.documents.map(d => (
             <div key={d.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -2424,53 +2430,56 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
               {linkState.__general__?.error && <div style={{ color: "var(--red)", fontSize: 11.5, marginTop: 4 }}>{linkState.__general__.error}</div>}
             </div>
           )}
+          {uploadError && <div style={{ color: "var(--red)", fontSize: 12.5, marginTop: 8 }}>{uploadError}</div>}
+        </div>
 
+        <div className="dc-card">
           <PortalChat
             portalConfig={portalConfig}
             initialMessages={client.messages || []}
             firmLabel={client.company || "your firm"}
           />
-          {uploadError && <div style={{ color: "var(--red)", fontSize: 12.5, marginTop: 8 }}>{uploadError}</div>}
-
-          {publicPortal && portalSessionToken && (
-            <div style={{ marginTop: 16, textAlign: "center" }}>
-              <button className="dc-btn dc-btn-ghost dc-btn-sm" onClick={onPortalLogout}>Log out</button>
-            </div>
-          )}
-
-          {publicPortal && !portalSessionToken && portalConfig && (
-            <div className="dc-card" style={{ background: "var(--bg-alt)", border: "none", marginTop: 16 }}>
-              {loginSetup.status === "done" ? (
-                <div style={{ fontSize: 12.5, color: "var(--green)" }}>
-                  ✓ Persistent login set up — next time, sign in at <strong>/portal/login</strong> with {client.email} instead of using this link.
-                </div>
-              ) : (
-                <>
-                  <div className="dc-serif" style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 4 }}>Set up a persistent login</div>
-                  <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 10 }}>
-                    Repeat client? Set a password once and sign in directly next time instead of needing a new link each visit.
-                  </div>
-                  <div style={{ display: "grid", gap: 8 }}>
-                    <input
-                      className="dc-input" type="password" placeholder="Create a password"
-                      value={loginSetup.password}
-                      onChange={(e) => setLoginSetup((p) => ({ ...p, password: e.target.value }))}
-                    />
-                    <input
-                      className="dc-input" type="password" placeholder="Confirm password"
-                      value={loginSetup.confirm}
-                      onChange={(e) => setLoginSetup((p) => ({ ...p, confirm: e.target.value }))}
-                    />
-                    <button className="dc-btn dc-btn-outline dc-btn-sm" onClick={setupPersistentLogin} disabled={loginSetup.status === "saving"}>
-                      {loginSetup.status === "saving" ? "Saving..." : "Set up login"}
-                    </button>
-                    {loginSetup.error && <div style={{ color: "var(--red)", fontSize: 12 }}>{loginSetup.error}</div>}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
         </div>
+        </div>
+
+        {publicPortal && portalSessionToken && (
+          <div style={{ marginTop: 16, textAlign: "center" }}>
+            <button className="dc-btn dc-btn-ghost dc-btn-sm" onClick={onPortalLogout}>Log out</button>
+          </div>
+        )}
+
+        {publicPortal && !portalSessionToken && portalConfig && (
+          <div className="dc-card" style={{ background: "var(--bg-alt)", border: "none", marginTop: 16 }}>
+            {loginSetup.status === "done" ? (
+              <div style={{ fontSize: 12.5, color: "var(--green)" }}>
+                ✓ Persistent login set up — next time, sign in at <strong>/portal/login</strong> with {client.email} instead of using this link.
+              </div>
+            ) : (
+              <>
+                <div className="dc-serif" style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 4 }}>Set up a persistent login</div>
+                <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 10 }}>
+                  Repeat client? Set a password once and sign in directly next time instead of needing a new link each visit.
+                </div>
+                <div style={{ display: "grid", gap: 8, maxWidth: 420 }}>
+                  <input
+                    className="dc-input" type="password" placeholder="Create a password"
+                    value={loginSetup.password}
+                    onChange={(e) => setLoginSetup((p) => ({ ...p, password: e.target.value }))}
+                  />
+                  <input
+                    className="dc-input" type="password" placeholder="Confirm password"
+                    value={loginSetup.confirm}
+                    onChange={(e) => setLoginSetup((p) => ({ ...p, confirm: e.target.value }))}
+                  />
+                  <button className="dc-btn dc-btn-outline dc-btn-sm" onClick={setupPersistentLogin} disabled={loginSetup.status === "saving"}>
+                    {loginSetup.status === "saving" ? "Saving..." : "Set up login"}
+                  </button>
+                  {loginSetup.error && <div style={{ color: "var(--red)", fontSize: 12 }}>{loginSetup.error}</div>}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

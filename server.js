@@ -1492,6 +1492,63 @@ app.post(
 );
 app.post("/api/portal/session/upload", resolvePortalClient, upload.single("file"), portalUploadHandler);
 
+const GOOGLE_LINK_HOSTS = new Set(["docs.google.com", "drive.google.com", "sheets.google.com"]);
+
+function isGoogleDocsLink(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && GOOGLE_LINK_HOSTS.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+// Some documents live as an ongoing Google Doc/Sheet the client doesn't want to export —
+// this lets them share a live link instead of uploading a static file.
+async function portalLinkHandler(req, res) {
+  try {
+    const target = req.portalClient;
+    const url = String(req.body?.url || "").trim();
+    if (!url) return res.status(400).json({ error: "A link is required." });
+    if (!isGoogleDocsLink(url)) return res.status(400).json({ error: "Please paste a Google Docs, Sheets, or Drive share link." });
+
+    const docId = req.body.docId;
+    const matchesExisting = docId && (target.documents || []).some((doc) => doc.id === docId);
+
+    if (matchesExisting) {
+      target.documents = target.documents.map((doc) => (
+        doc.id !== docId ? doc : { ...doc, status: "Received", linkUrl: url, linkedAt: new Date().toISOString() }
+      ));
+    } else {
+      target.documents = [
+        ...(target.documents || []),
+        {
+          id: crypto.randomUUID(),
+          name: "Google Docs link",
+          category: "Client upload",
+          status: "Received",
+          note: "Shared by the client as a Google Docs link — not part of a specific request.",
+          dueDate: null,
+          linkUrl: url,
+          linkedAt: new Date().toISOString(),
+          versions: [],
+        },
+      ];
+    }
+    target.log = [
+      ...(target.log || []),
+      { date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), type: "Portal upload", note: "Shared a Google Docs link" },
+    ];
+    addActivity("portal_link", `${target.name} shared a Google Docs link`, null, target.firmId);
+    await saveData();
+    res.json({ ok: true, client: publicClientView(target) });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Could not save the link" });
+  }
+}
+app.post(["/api/portal/:identifier/:token/link", "/api/p/:identifier/:token/link"], resolvePortalClient, portalLinkHandler);
+app.post("/api/portal/session/link", resolvePortalClient, portalLinkHandler);
+
 async function portalCommentHandler(req, res) {
   try {
     const target = req.portalClient;

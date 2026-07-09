@@ -4,7 +4,7 @@ import {
   Upload, CheckCircle2, Clock, AlertTriangle, XCircle, Send, Copy,
   Sparkles, ArrowRight, Mail, Lock, ChevronRight, ChevronLeft, Plus,
   Building2, Calendar, Bell, Loader2, Menu, X, Check, MinusCircle,
-  FileStack, Search, Wand2, Trash2
+  FileStack, Search, Wand2, Trash2, Link2, ExternalLink
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from "recharts";
 
@@ -1771,6 +1771,13 @@ function ClientProfile({ client, updateClient, onBack, onRemoveClient, setPage, 
                       </button>
                     )}
                     {d.uploadedUrl && <DocPreview url={d.uploadedUrl} authed={true} fileName={d.uploadedFile} mimeType={d.uploadedMimeType} />}
+                    {d.linkUrl && (
+                      <div style={{ marginTop: 4 }}>
+                        <a href={d.linkUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, color: "var(--gold-dark)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <Link2 size={12} /> Open Google Doc <ExternalLink size={11} />
+                        </a>
+                      </div>
+                    )}
                     {d.aiClassificationFlag?.suggested && (
                       <div style={{ fontSize: 11.5, color: "var(--red)", marginTop: 4 }}>
                         Clara thinks this might actually be "{d.aiClassificationFlag.suggested}" — worth a look.
@@ -2124,6 +2131,7 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
   const [uploads, setUploads] = useState({});
   const [uploadError, setUploadError] = useState("");
   const [generalUploadStatus, setGeneralUploadStatus] = useState("idle");
+  const [linkState, setLinkState] = useState({});
   const [loginSetup, setLoginSetup] = useState({ password: "", confirm: "", status: "idle", error: "" });
 
   const patchDoc = (docId, patch) => {
@@ -2210,6 +2218,39 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
     } catch (error) {
       setUploadError(error.message || "Upload failed");
       setGeneralUploadStatus("idle");
+    }
+  };
+
+  const toggleLinkInput = (key) => {
+    setLinkState((prev) => ({ ...prev, [key]: { ...(prev[key] || { value: "", saving: false, error: "" }), open: !prev[key]?.open } }));
+  };
+
+  const setLinkValue = (key, value) => {
+    setLinkState((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), value } }));
+  };
+
+  const submitLink = async (docId) => {
+    const key = docId || "__general__";
+    const url = (linkState[key]?.value || "").trim();
+    if (!url || !portalConfig) return;
+    setLinkState((prev) => ({ ...prev, [key]: { ...prev[key], saving: true, error: "" } }));
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (portalConfig.authHeader) headers.Authorization = portalConfig.authHeader;
+      const res = await fetch(`${API_BASE_URL}${portalConfig.actionBase}/link`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(docId ? { docId, url } : { url }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't save that link.");
+      if (data.client) {
+        if (publicPortal) setLocalClient(data.client);
+        else updateClient(data.client);
+      }
+      setLinkState((prev) => ({ ...prev, [key]: { open: false, value: "", saving: false, error: "" } }));
+    } catch (error) {
+      setLinkState((prev) => ({ ...prev, [key]: { ...prev[key], saving: false, error: error.message || "Couldn't save that link." } }));
     }
   };
 
@@ -2315,8 +2356,23 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
                   <Upload size={13} /> {uploads[d.id] ? "Uploaded" : "Upload"}
                   <input type="file" style={{ display: "none" }} onChange={(event) => handleUpload(d.id, event)} />
                 </label>
+                <button className="dc-btn dc-btn-outline dc-btn-sm" onClick={() => toggleLinkInput(d.id)}><Link2 size={13} /> Google Docs</button>
                 <button className="dc-btn dc-btn-ghost dc-btn-sm" onClick={() => setDocStatus(d.id, "Not applicable")}><MinusCircle size={13} /> N/A</button>
               </div>
+              {linkState[d.id]?.open && (
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <input
+                    className="dc-input" placeholder="Paste a Google Docs, Sheets, or Drive link"
+                    value={linkState[d.id]?.value || ""}
+                    onChange={(e) => setLinkValue(d.id, e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && submitLink(d.id)}
+                  />
+                  <button className="dc-btn dc-btn-primary dc-btn-sm" onClick={() => submitLink(d.id)} disabled={linkState[d.id]?.saving}>
+                    {linkState[d.id]?.saving ? "Saving..." : "Save"}
+                  </button>
+                </div>
+              )}
+              {linkState[d.id]?.error && <div style={{ color: "var(--red)", fontSize: 11.5, marginTop: 4 }}>{linkState[d.id].error}</div>}
               {d.uploadedFile && (
                 <div style={{ marginTop: 7 }}>
                   <div style={{ fontSize: 11.5, color: "var(--green)" }}>Saved file: {d.uploadedFile}</div>
@@ -2331,17 +2387,41 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
                   )}
                 </div>
               )}
+              {d.linkUrl && (
+                <div style={{ marginTop: 7, fontSize: 11.5 }}>
+                  <a href={d.linkUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--gold-dark)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <Link2 size={12} /> Open Google Doc <ExternalLink size={11} />
+                  </a>
+                </div>
+              )}
             </div>
           ))}
 
           {publicPortal && portalConfig && (
             <div className="dc-card" style={{ background: "var(--bg-alt)", border: "none", marginTop: 4, marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Have something else to share?</div>
-              <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 10 }}>Upload any file, even if it's not on the list above.</div>
-              <label className="dc-btn dc-btn-outline dc-btn-sm" style={{ cursor: "pointer" }}>
-                <Upload size={13} /> {generalUploadStatus === "uploading" ? "Uploading..." : generalUploadStatus === "done" ? "Uploaded" : "Upload a file"}
-                <input type="file" style={{ display: "none" }} onChange={handleGeneralUpload} disabled={generalUploadStatus === "uploading"} />
-              </label>
+              <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 10 }}>Upload any file, or share a Google Docs/Sheets link, even if it's not on the list above.</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <label className="dc-btn dc-btn-outline dc-btn-sm" style={{ cursor: "pointer" }}>
+                  <Upload size={13} /> {generalUploadStatus === "uploading" ? "Uploading..." : generalUploadStatus === "done" ? "Uploaded" : "Upload a file"}
+                  <input type="file" style={{ display: "none" }} onChange={handleGeneralUpload} disabled={generalUploadStatus === "uploading"} />
+                </label>
+                <button className="dc-btn dc-btn-outline dc-btn-sm" onClick={() => toggleLinkInput("__general__")}><Link2 size={13} /> Google Docs link</button>
+              </div>
+              {linkState.__general__?.open && (
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <input
+                    className="dc-input" placeholder="Paste a Google Docs, Sheets, or Drive link"
+                    value={linkState.__general__?.value || ""}
+                    onChange={(e) => setLinkValue("__general__", e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && submitLink(null)}
+                  />
+                  <button className="dc-btn dc-btn-primary dc-btn-sm" onClick={() => submitLink(null)} disabled={linkState.__general__?.saving}>
+                    {linkState.__general__?.saving ? "Saving..." : "Save"}
+                  </button>
+                </div>
+              )}
+              {linkState.__general__?.error && <div style={{ color: "var(--red)", fontSize: 11.5, marginTop: 4 }}>{linkState.__general__.error}</div>}
             </div>
           )}
 

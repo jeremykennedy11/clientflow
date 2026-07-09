@@ -1529,7 +1529,13 @@ function DocPreview({ url, authed, authHeader, fileName, mimeType }) {
   if (state.status === "error") return null;
   return isImage
     ? <img src={state.url} alt={fileName} style={{ maxWidth: "100%", maxHeight: 240, borderRadius: 8, border: "1px solid var(--line)", marginTop: 8, display: "block" }} />
-    : <iframe src={state.url} title={fileName} style={{ width: "100%", height: 320, border: "1px solid var(--line)", borderRadius: 8, marginTop: 8 }} />;
+    : (
+      <iframe
+        src={`${state.url}#toolbar=0&navpanes=0`}
+        title={fileName}
+        style={{ width: "100%", height: 280, border: "1px solid var(--line)", borderRadius: 8, marginTop: 8, background: "var(--bg-alt)" }}
+      />
+    );
 }
 
 function DocVersionHistory({ versions, downloadFile }) {
@@ -1753,12 +1759,12 @@ function ClientProfile({ client, updateClient, onBack, onRemoveClient, setPage, 
               )}
             </div>
             {client.documents.map(d => (
-              <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 0", borderBottom: "1px solid var(--line)", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "11px 0", borderBottom: "1px solid var(--line)", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flex: "1 1 320px", minWidth: 0 }}>
                   {canManageClients && (
                     <input type="checkbox" style={{ marginTop: 4 }} checked={selectedDocs.has(d.id)} onChange={() => toggleDocSelected(d.id)} />
                   )}
-                  <div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontWeight: 500, fontSize: 13.5 }}>{d.name}</div>
                     <div style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>{d.category}{d.dueDate ? ` · due ${d.dueDate}` : ""}{d.note ? ` — ${d.note}` : ""}</div>
                     {d.uploadedUrl && (
@@ -1785,7 +1791,7 @@ function ClientProfile({ client, updateClient, onBack, onRemoveClient, setPage, 
                     {d.versions?.length > 0 && <DocVersionHistory versions={d.versions} downloadFile={downloadFile} />}
                   </div>
                 </div>
-                <select className="dc-select" style={{ width: "auto", minWidth: 140, fontSize: 12.5 }} value={d.status} onChange={(e) => setDocStatus(d.id, e.target.value)} disabled={!canManageClients}>
+                <select className="dc-select" style={{ width: "auto", minWidth: 140, fontSize: 12.5, flexShrink: 0 }} value={d.status} onChange={(e) => setDocStatus(d.id, e.target.value)} disabled={!canManageClients}>
                   {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>

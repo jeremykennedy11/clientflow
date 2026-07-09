@@ -1419,41 +1419,69 @@ async function portalUploadHandler(req, res) {
     }
 
     const docId = req.body.docId;
-    target.documents = (target.documents || []).map((doc) => {
-      if (doc.id !== docId) return doc;
-      const previousVersion = doc.uploadedFile ? {
-        uploadedAt: doc.uploadedAt,
-        uploadedFile: doc.uploadedFile,
-        uploadedUrl: doc.uploadedUrl,
-        uploadedFileKey: doc.uploadedFileKey,
-        uploadedStoragePath: doc.uploadedStoragePath || null,
-        uploadedMimeType: doc.uploadedMimeType || null,
-      } : null;
-      return {
-        ...doc,
-        status: "Received",
-        uploadedAt: new Date().toISOString(),
-        uploadedFile: req.file.originalname,
-        uploadedUrl,
-        uploadedFileKey: fileKey,
-        uploadedStoragePath: storagePath,
-        uploadedMimeType: req.file.mimetype || null,
-        aiClassificationFlag: null,
-        versions: previousVersion ? [...(doc.versions || []), previousVersion] : (doc.versions || []),
-      };
-    });
+    const matchesExisting = docId && (target.documents || []).some((doc) => doc.id === docId);
+
+    if (matchesExisting) {
+      target.documents = target.documents.map((doc) => {
+        if (doc.id !== docId) return doc;
+        const previousVersion = doc.uploadedFile ? {
+          uploadedAt: doc.uploadedAt,
+          uploadedFile: doc.uploadedFile,
+          uploadedUrl: doc.uploadedUrl,
+          uploadedFileKey: doc.uploadedFileKey,
+          uploadedStoragePath: doc.uploadedStoragePath || null,
+          uploadedMimeType: doc.uploadedMimeType || null,
+        } : null;
+        return {
+          ...doc,
+          status: "Received",
+          uploadedAt: new Date().toISOString(),
+          uploadedFile: req.file.originalname,
+          uploadedUrl,
+          uploadedFileKey: fileKey,
+          uploadedStoragePath: storagePath,
+          uploadedMimeType: req.file.mimetype || null,
+          aiClassificationFlag: null,
+          versions: previousVersion ? [...(doc.versions || []), previousVersion] : (doc.versions || []),
+        };
+      });
+    } else {
+      // Not tied to a requested checklist item — the client is sharing something extra,
+      // so give it its own entry rather than silently dropping the upload.
+      target.documents = [
+        ...(target.documents || []),
+        {
+          id: crypto.randomUUID(),
+          name: req.file.originalname,
+          category: "Client upload",
+          status: "Received",
+          note: "Uploaded by the client — not part of a specific request.",
+          dueDate: null,
+          uploadedAt: new Date().toISOString(),
+          uploadedFile: req.file.originalname,
+          uploadedUrl,
+          uploadedFileKey: fileKey,
+          uploadedStoragePath: storagePath,
+          uploadedMimeType: req.file.mimetype || null,
+          aiClassificationFlag: null,
+          versions: [],
+        },
+      ];
+    }
     target.log = [
       ...(target.log || []),
       { date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), type: "Portal upload", note: `Uploaded ${req.file.originalname}` },
     ];
     addActivity("portal_upload", `${target.name} uploaded ${req.file.originalname}`, null, target.firmId);
-    const uploadedDoc = target.documents.find((doc) => doc.id === docId);
-    if (uploadedDoc) {
-      try { await classifyUpload(target, uploadedDoc, req.file.originalname); } catch { /* best-effort only */ }
+    if (matchesExisting) {
+      const uploadedDoc = target.documents.find((doc) => doc.id === docId);
+      if (uploadedDoc) {
+        try { await classifyUpload(target, uploadedDoc, req.file.originalname); } catch { /* best-effort only */ }
+      }
     }
     await saveData();
 
-    res.json({ ok: true, fileName: req.file.originalname, url: uploadedUrl, fileKey, storagePath, mimeType: req.file.mimetype });
+    res.json({ ok: true, fileName: req.file.originalname, url: uploadedUrl, fileKey, storagePath, mimeType: req.file.mimetype, client: publicClientView(target) });
   } catch (error) {
     res.status(500).json({ error: error.message || "Upload failed" });
   }

@@ -478,6 +478,7 @@ function Landing({ onStart, onDemo, onPortalLogin }) {
         <Logo />
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <button className="dc-btn dc-btn-ghost dc-hide-mobile" onClick={onPortalLogin}>Client login</button>
+          <button className="dc-btn dc-btn-ghost dc-hide-mobile" onClick={onStart}>Log in</button>
           <button className="dc-btn dc-btn-ghost dc-hide-mobile" onClick={onDemo}>View demo</button>
           <button className="dc-btn dc-btn-primary" onClick={onStart}>Start free trial</button>
         </div>
@@ -2122,6 +2123,7 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
   const [showLanding, setShowLanding] = useState(publicPortal);
   const [uploads, setUploads] = useState({});
   const [uploadError, setUploadError] = useState("");
+  const [generalUploadStatus, setGeneralUploadStatus] = useState("idle");
   const [loginSetup, setLoginSetup] = useState({ password: "", confirm: "", status: "idle", error: "" });
 
   const patchDoc = (docId, patch) => {
@@ -2177,6 +2179,37 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
       });
     } catch (error) {
       setUploadError(error.message || "Upload failed");
+    }
+  };
+
+  const handleGeneralUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setUploadError("");
+    setGeneralUploadStatus("uploading");
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      let res;
+      if (publicPortal && portalConfig) {
+        const headers = portalConfig.authHeader ? { Authorization: portalConfig.authHeader } : undefined;
+        res = await fetch(`${API_BASE_URL}${portalConfig.actionBase}/upload`, { method: "POST", body: formData, headers });
+      } else {
+        res = await authedFetch("/api/uploads", { method: "POST", body: formData });
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      if (data.client) {
+        if (publicPortal) setLocalClient(data.client);
+        else updateClient(data.client);
+      }
+      setGeneralUploadStatus("done");
+      setTimeout(() => setGeneralUploadStatus("idle"), 3000);
+    } catch (error) {
+      setUploadError(error.message || "Upload failed");
+      setGeneralUploadStatus("idle");
     }
   };
 
@@ -2300,6 +2333,17 @@ function ClientPortal({ clients, clientId, setClientId, updateClient, publicPort
               )}
             </div>
           ))}
+
+          {publicPortal && portalConfig && (
+            <div className="dc-card" style={{ background: "var(--bg-alt)", border: "none", marginTop: 4, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Have something else to share?</div>
+              <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 10 }}>Upload any file, even if it's not on the list above.</div>
+              <label className="dc-btn dc-btn-outline dc-btn-sm" style={{ cursor: "pointer" }}>
+                <Upload size={13} /> {generalUploadStatus === "uploading" ? "Uploading..." : generalUploadStatus === "done" ? "Uploaded" : "Upload a file"}
+                <input type="file" style={{ display: "none" }} onChange={handleGeneralUpload} disabled={generalUploadStatus === "uploading"} />
+              </label>
+            </div>
+          )}
 
           <PortalChat
             portalConfig={portalConfig}

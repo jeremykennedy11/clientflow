@@ -1712,7 +1712,7 @@ function ClientProfile({ client, updateClient, onBack, onRemoveClient, setPage, 
     <div>
       <button className="dc-btn dc-btn-ghost dc-btn-sm" style={{ marginBottom: 16 }} onClick={onBack}><ChevronLeft size={13} /> All clients</button>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, flexWrap: "wrap", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: confirmingRemove ? 14 : 22, flexWrap: "wrap", gap: 12 }}>
         <div>
           <div className="dc-serif" style={{ fontSize: 26, fontWeight: 700 }}>{client.name}</div>
           <div style={{ fontSize: 13.5, color: "var(--ink-soft)", display: "flex", gap: 14, marginTop: 6, flexWrap: "wrap" }}>
@@ -1720,37 +1720,44 @@ function ClientProfile({ client, updateClient, onBack, onRemoveClient, setPage, 
             <span><Mail size={13} style={{ verticalAlign: -2 }} /> {client.email}</span>
           </div>
         </div>
-        <StatusStamp status={client.status} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <StatusStamp status={client.status} />
+          {canManageClients && !confirmingRemove && (
+            <button
+              className="dc-btn dc-btn-ghost dc-btn-sm"
+              title="Remove client"
+              style={{ color: "var(--ink-faint)" }}
+              onClick={() => setConfirmingRemove(true)}
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+        </div>
       </div>
 
-      {canManageClients && (
-        <div style={{ marginBottom: 22 }}>
-          {!confirmingRemove ? (
-            <button className="dc-btn dc-btn-ghost dc-btn-sm" style={{ color: "var(--red)" }} onClick={() => setConfirmingRemove(true)}>
-              <Trash2 size={13} /> Remove client
+      {canManageClients && confirmingRemove && (
+        <div className="dc-card" style={{ borderColor: "var(--red)", marginBottom: 22 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>Remove {client.name}?</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>
+            This permanently deletes their document checklist, uploads, and message history, and disables their portal link. This can't be undone.
+          </div>
+          {removeError && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 8 }}>{removeError}</div>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="dc-btn dc-btn-sm" style={{ background: "var(--red)", borderColor: "var(--red)", color: "#fff" }} onClick={handleRemove} disabled={removing}>
+              {removing ? "Removing..." : "Yes, remove client"}
             </button>
-          ) : (
-            <div className="dc-card" style={{ borderColor: "var(--red)" }}>
-              <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>Remove {client.name}?</div>
-              <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>
-                This permanently deletes their document checklist, uploads, and message history, and disables their portal link. This can't be undone.
-              </div>
-              {removeError && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 8 }}>{removeError}</div>}
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="dc-btn dc-btn-sm" style={{ background: "var(--red)", borderColor: "var(--red)", color: "#fff" }} onClick={handleRemove} disabled={removing}>
-                  {removing ? "Removing..." : "Yes, remove client"}
-                </button>
-                <button className="dc-btn dc-btn-ghost dc-btn-sm" onClick={() => { setConfirmingRemove(false); setRemoveError(""); }} disabled={removing}>Cancel</button>
-              </div>
-            </div>
-          )}
+            <button className="dc-btn dc-btn-ghost dc-btn-sm" onClick={() => { setConfirmingRemove(false); setRemoveError(""); }} disabled={removing}>Cancel</button>
+          </div>
         </div>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginBottom: 16, alignItems: "start" }}>
         <div className="dc-card">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-              <div className="dc-serif" style={{ fontWeight: 600 }}>Document checklist</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <FileStack size={15} color="var(--gold-dark)" />
+                <span className="dc-serif" style={{ fontWeight: 600 }}>Document checklist</span>
+              </div>
               {canManageClients && selectedDocs.size > 0 && (
                 <div style={{ display: "flex", gap: 8 }}>
                   <button className="dc-btn dc-btn-outline dc-btn-sm" onClick={() => bulkSetStatus("Approved")}>Approve selected ({selectedDocs.size})</button>
@@ -1758,6 +1765,28 @@ function ClientProfile({ client, updateClient, onBack, onRemoveClient, setPage, 
                 </div>
               )}
             </div>
+
+            {client.documents.length === 0 && (
+              <div style={{ fontSize: 13, color: "var(--ink-faint)", padding: "4px 0 8px" }}>No documents requested yet.</div>
+            )}
+
+            {client.documents.length > 0 && (() => {
+              const total = client.documents.length;
+              const done = client.documents.filter(d => ["Received", "In review", "Approved"].includes(d.status)).length;
+              const pct = Math.round((done / total) * 100);
+              return (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 5 }}>
+                    <span>{done} of {total} received</span>
+                    <span>{pct}%</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 999, background: "var(--bg-alt)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${pct}%`, borderRadius: 999, background: "var(--gold-dark)", transition: "width .3s ease" }} />
+                  </div>
+                </div>
+              );
+            })()}
+
             {client.documents.map(d => (
               <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "11px 0", borderBottom: "1px solid var(--line)", gap: 10, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flex: "1 1 320px", minWidth: 0 }}>
@@ -1804,7 +1833,10 @@ function ClientProfile({ client, updateClient, onBack, onRemoveClient, setPage, 
       <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
         <div>
           <div className="dc-card">
-            <div className="dc-serif" style={{ fontWeight: 600, marginBottom: 12 }}>Communication history</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
+              <Clock size={15} color="var(--gold-dark)" />
+              <span className="dc-serif" style={{ fontWeight: 600 }}>Communication history</span>
+            </div>
             {client.log.length === 0 && <div style={{ fontSize: 13, color: "var(--ink-faint)" }}>No communication logged yet.</div>}
             {client.log.map((l, i) => (
               <div key={i} style={{ fontSize: 13, padding: "9px 0", borderBottom: "1px solid var(--line)" }}>
@@ -1896,7 +1928,10 @@ function ClientProfile({ client, updateClient, onBack, onRemoveClient, setPage, 
           )}
 
           <div className="dc-card">
-            <div className="dc-serif" style={{ fontWeight: 600, marginBottom: 10 }}>Client portal</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
+              <Link2 size={15} color="var(--gold-dark)" />
+              <span className="dc-serif" style={{ fontWeight: 600 }}>Client portal</span>
+            </div>
             <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 12 }}>Share a secure link for {client.name} to upload documents directly.</div>
             <button className="dc-btn dc-btn-gold dc-btn-sm" style={{ width: "100%", justifyContent: "center", marginBottom: 8 }} onClick={sharePortalLink} disabled={!canManageClients}>
               <Send size={13} /> {linkCopied ? "Link shared!" : "Send request link"}

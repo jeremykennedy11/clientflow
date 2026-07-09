@@ -4,7 +4,7 @@ import {
   Upload, CheckCircle2, Clock, AlertTriangle, XCircle, Send, Copy,
   Sparkles, ArrowRight, Mail, Lock, ChevronRight, ChevronLeft, Plus,
   Building2, Calendar, Bell, Loader2, Menu, X, Check, MinusCircle,
-  FileStack, Search, Wand2
+  FileStack, Search, Wand2, Trash2
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from "recharts";
 
@@ -1572,7 +1572,7 @@ function DocVersionHistory({ versions, downloadFile }) {
   );
 }
 
-function ClientProfile({ client, updateClient, onBack, setPage, canManageClients }) {
+function ClientProfile({ client, updateClient, onBack, onRemoveClient, setPage, canManageClients }) {
   const [tone, setTone] = useState("Friendly");
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1581,6 +1581,21 @@ function ClientProfile({ client, updateClient, onBack, setPage, canManageClients
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState("");
   const [selectedDocs, setSelectedDocs] = useState(() => new Set());
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState("");
+
+  const handleRemove = async () => {
+    if (!onRemoveClient) return;
+    setRemoving(true);
+    setRemoveError("");
+    try {
+      await onRemoveClient(client.id);
+    } catch (error) {
+      setRemoveError(error.message || "Couldn't remove this client.");
+      setRemoving(false);
+    }
+  };
 
   const missing = client.documents.filter(d => ["Requested","Overdue","Rejected"].includes(d.status));
 
@@ -1700,6 +1715,30 @@ function ClientProfile({ client, updateClient, onBack, setPage, canManageClients
         </div>
         <StatusStamp status={client.status} />
       </div>
+
+      {canManageClients && (
+        <div style={{ marginBottom: 22 }}>
+          {!confirmingRemove ? (
+            <button className="dc-btn dc-btn-ghost dc-btn-sm" style={{ color: "var(--red)" }} onClick={() => setConfirmingRemove(true)}>
+              <Trash2 size={13} /> Remove client
+            </button>
+          ) : (
+            <div className="dc-card" style={{ borderColor: "var(--red)" }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>Remove {client.name}?</div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>
+                This permanently deletes their document checklist, uploads, and message history, and disables their portal link. This can't be undone.
+              </div>
+              {removeError && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 8 }}>{removeError}</div>}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="dc-btn dc-btn-sm" style={{ background: "var(--red)", borderColor: "var(--red)", color: "#fff" }} onClick={handleRemove} disabled={removing}>
+                  {removing ? "Removing..." : "Yes, remove client"}
+                </button>
+                <button className="dc-btn dc-btn-ghost dc-btn-sm" onClick={() => { setConfirmingRemove(false); setRemoveError(""); }} disabled={removing}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
         <div>
@@ -2521,6 +2560,11 @@ export default function App() {
     persistClient(updated);
   };
 
+  const removeClient = async (clientId) => {
+    const data = await apiRequest(`/api/clients/${clientId}`, { method: "DELETE" });
+    setClients(normalizeClients(data.clients || []));
+  };
+
   const handlePortalLoginSubmit = async ({ email, password }) => {
     const res = await fetch(`${API_BASE_URL}/api/portal/login`, {
       method: "POST",
@@ -2762,7 +2806,7 @@ export default function App() {
           {page === "dashboard" && <Dashboard clients={clients} setPage={setPage} setSelectedId={setSelectedId} authUser={authUser} team={teamMembers} invitations={invitations} onManageTeam={() => setPage("admin")} canManageTeam={canManageTeam} activityLog={activityLog} billingSummary={billingSummary} invoices={invoices} />}
           {page === "clients" && !selectedClient && <ClientsList clients={clients} onSelect={setSelectedId} setPage={setPage} onAddClient={addClient} onBulkRemind={bulkRemindOverdue} canManageClients={canManageTeam} />}
           {page === "clients" && selectedClient && (
-            <ClientProfile client={selectedClient} updateClient={updateClient} onBack={() => setSelectedId(null)} setPage={setPage} canManageClients={canManageTeam} />
+            <ClientProfile client={selectedClient} updateClient={updateClient} onBack={() => setSelectedId(null)} onRemoveClient={async (id) => { await removeClient(id); setSelectedId(null); }} setPage={setPage} canManageClients={canManageTeam} />
           )}
           {page === "builder" && <RequestBuilder clients={clients} addRequest={addRequest} setRecurringChecklist={setRecurringChecklist} canManageClients={canManageTeam} />}
           {page === "admin" && <AdminSettings authUser={authUser} team={teamMembers} invitations={invitations} onInvite={inviteTeammate} canManageTeam={canManageTeam} />}
